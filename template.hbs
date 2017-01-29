@@ -1,0 +1,176 @@
+// ==UserScript==
+// @name            Any Infinite Scroll - {{{metadata.name}}}
+// @namespace       noc7c9
+// @description     Infinite scroll for {{{metadata.name}}}.
+{{#each metadata.include}}
+// @include         {{{this}}}
+{{/each}}
+{{#each metadata.exclude}}
+// @exclude         {{{this}}}
+{{/each}}
+// @require         https://code.jquery.com/jquery-3.1.1.min.js
+// @version         {{version}}
+// @grant           none
+// ==/UserScript==
+
+// page specific functionality
+var grabNextUrl = ({{{code.grabNextUrl}}});
+var grabPage = ({{{code.grabPage}}});
+
+// constants
+var INITIAL_PAGES = {{options.initialPages}};
+var MAX_PAGES = {{options.maxPages}};
+
+// cached references
+var initialUrl = document.location.href;
+var $doc = $(document);
+var $window = $(window);
+var $windowScrollPos = $window.scrollTop.bind($window);
+var $title = $('title');
+var $replacementDiv;
+
+// page load state vars
+var nextUrl = grabNextUrl($doc, initialUrl, null);
+var pagesLoaded = [grabPage($doc, initialUrl, null)];
+var scrollLoadPoints = [pagesLoaded[0]];
+
+// load queue state vars
+// used to make sure pages are always loaded in order
+var loadInProgress = false;
+var loadQueued = 0;
+
+function queueLoad(numPagesToQueue) {
+    // nothing to load, so stop
+    if (!nextUrl) {
+        return;
+    }
+
+    loadQueued += numPagesToQueue;
+
+    if (loadInProgress || loadQueued <= 0) {
+        return;
+    }
+
+    loadQueued -= 1;
+    console.log('loading page', nextUrl, 'with', loadQueued, 'in queue');
+
+    // fetch next page
+    loadInProgress = true;
+    var currentUrl = nextUrl;
+    $.get(currentUrl)
+        .done(function (rawData) {
+            var $data = $(rawData);
+
+            // grab next page url from data
+            try {
+                nextUrl = grabNextUrl($data, currentUrl, rawData);
+            } catch (e) {
+                console.log('error: failed to grab next page url');
+                nextUrl = null;
+            }
+
+            // grab desired content from the result
+            var page;
+            try {
+                page = grabPage($data, currentUrl, rawData);
+            } catch (e) {
+                console.log('error: failed to grab page content');
+                page = null;
+            }
+
+            if (page) {
+                page.data('url', currentUrl);
+
+                // it seems its not possible to process head elements using jquery
+                // or a documentFragment, so use old fashioned text parsing instead
+                page.data('title', rawData.split('</title>', 1)[0].split('<title>')[1]);
+
+                // add the new page
+                pagesLoaded[pagesLoaded.length - 1].last().after(page);
+                pagesLoaded.push(page);
+
+                // add the new element as a new load point
+                scrollLoadPoints.push(page);
+
+                console.log('loading page complete');
+            }
+
+            loadInProgress = false;
+            // if there are more loads queued
+            // continue loading more pages without queuing more
+            if (loadQueued > 0) {
+                queueLoad(0);
+            }
+
+            // unload oldest page if there are too many
+            if (pagesLoaded.length > MAX_PAGES) {
+                var toUnload = pagesLoaded.shift();
+                $replacementDiv.outerHeight(
+                    $replacementDiv.outerHeight() + toUnload.outerHeight());
+                toUnload.remove();
+
+                console.log('unloaded oldest page');
+            }
+        });
+}
+
+// load new pages on scrolling to load points
+$window.on('scroll', function () {
+    if (scrollLoadPoints[0]) {
+        // check if scrolling has reached the next load point
+        if ($windowScrollPos() >= scrollLoadPoints[0].offset().top) {
+            console.log('load point reached');
+
+            // update history as well as title
+            var oldPage = scrollLoadPoints.shift();
+            var currentPageUrl = oldPage.data('url');
+            if (currentPageUrl) {
+                $title.text(oldPage.data('title'));
+
+                history.pushState({
+                    url: currentPageUrl
+                }, '', currentPageUrl);
+            }
+
+            // load another page
+            queueLoad(1);
+        }
+    }
+});
+
+// setup handler to actually reload if user changes history
+$window.on('popstate', function (e) {
+    var state = e.originalEvent.state;
+    var url = state && state.url;
+    if (url) {
+        document.location = url;
+    }
+    console.log('popstate', state);
+});
+
+// don't allow auto scrolling on back/forward
+if ('scrollRestoration' in history) {
+    history.scrollRestoration = 'manual';
+}
+
+// create a div that will take expand as pages are removed
+// inserted before the first page
+$replacementDiv = $('<div></div>');
+$replacementDiv.insertBefore(pagesLoaded[0]);
+
+// load initial pages
+$window.on('load', function () {
+    // reset scroll to avoid accidently triggering a bunch of loads
+    $window.scrollTop(0);
+
+    // create an initial state for history
+    if (history.state === null) {
+        console.log('creating initial history state');
+        history.replaceState({
+            url: initialUrl
+        }, '', initialUrl);
+    }
+
+    console.log('loading initial', INITIAL_PAGES, 'pages');
+    queueLoad(INITIAL_PAGES);
+});

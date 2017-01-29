@@ -1,0 +1,13 @@
+{
+  "name": "any-infinite-scroll-userscripts",
+  "author": "Athir Saleem <noc7c9@gmail.com>",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "A simple tool to quickly create userscripts that add infinite scroll functionally to any webpage.",
+  "scripts": {
+    "start": "node make.js --all"
+  },
+  "dependencies": {
+    "handlebars": "^4.0.6"
+  }
+}
