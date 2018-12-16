@@ -8,7 +8,7 @@
             return $.find('.page a').get(0).href;
         },
         grabPage: function ($) {
-            return $.find('#manga-page');
+            return $.find('#manga-page').parent();
         },
     },
 }
